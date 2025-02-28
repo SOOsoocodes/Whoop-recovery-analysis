@@ -1,0 +1,324 @@
+HRV_corr_analysis <- read_xlsx(file.choose()) #select "correlationwhoop" dataset
+HRV_corr_analysis$PreHA_HTT2_END_HR <- as.numeric(as.character(HRV_corr_analysis$PreHA_HTT2_END_HR)) # fix string error
+HRV_corr_analysis$PostHA_HTT2_END_HR <- as.numeric(as.character(HRV_corr_analysis$PostHA_HTT2_END_HR)) #fix string error
+HRV_corr_analysis$PreHA_HTT1_AveHR <- as.numeric(as.character(HRV_corr_analysis$PreHA_HTT1_AveHR))
+HRV_corr_clean <- HRV_corr_analysis %>% 
+  rename(
+    supplement = Supplement_3None_4BC_5CR) %>% 
+  # mutate(POSTDAY9_restorative_sleep = POSTDAY9_REM + POSTDAY9_DEEP,
+  #        POSTDAY10_restorative_sleep = POSTDAY10_REM + POSTDAY10_DEEP,
+  #        POSTHA5_restorative_sleep = POSTHA5_REM + POSTHA5_DEEP,
+  #        POSTHA4_restorative_sleep = POSTHA4_REM + POSTHA4_DEEP,
+  #        POSTHA3_restorative_sleep = POSTHA3_REM + POSTHA3_DEEP,
+  #        POSTHA2_restorative_sleep = POSTHA2_REM + POSTHA2_DEEP,
+  #        POSTHA1_restorative_sleep = POSTHA1_REM + POSTHA1_DEEP,
+  #        PREHA1_restorative_sleep = PREHA1_REM + PREHA1_DEEP,
+  #        POSTB3_restorative_sleep = POSTB3_REM + POSTB3_DEEP,
+  #        POSTB2_restorative_sleep = POSTB2_REM + POSTB2_DEEP)%>% 
+  select(-contains("POSTB2_baseline"), -contains("PREHA_HTT1_1P_2F"), -contains("PREHA_HTT2_1P_2F")) %>% 
+  filter(!(supplement %in% c(4,5))) %>% 
+  pivot_longer(cols = matches("PRE|POST|HTT1|HTT2"),
+               names_to = "Days",
+               values_to = "values")
+
+data_htt2 <- HRV_corr_clean %>%
+  filter(Days == "PreHA_HTT2_MaxHR" | grepl("(?<!preHA_|preHA_pre|postHA_pre|pre|postHA_Pre)HTT2", Days, perl = TRUE))
+
+data_htt1 <- HRV_corr_clean %>%
+  filter(Days == "PreHA_HTT1_AveHR" | grepl("(?<!preHA_|preHA_pre|postHA_pre|pre|postHA_Pre)HTT1", Days, perl = TRUE))
+# Adjust if necessary to select other recovery measures
+
+# Reshape back to wide format for correlation
+data_htt2_wide <- data_htt2 %>%
+  pivot_wider(names_from = Days, values_from = values)
+
+data_htt1_wide <- data_htt1 %>%
+  pivot_wider(names_from = Days, values_from = values)
+
+head(data_htt1_wide)
+
+recovery_vars <- c("postHA_HTT2_HRV", "postHA_HTT2_RHR", "postHA_HTT2_TST", "postHA_HTT2_REM", "postHA_HTT2_DEEP", "postHA_HTT2_LIGHT", "postHA_HTT2_SE", "postHA_HTT2_Rest", "postHA_HTT2_TIB")
+str(data_htt2_wide$PreHA_HTT2_RoR_Trec)
+str(data_htt2_wide[[var]])
+
+
+# Create empty data frame for results
+cor_results <- data.frame(
+  Recovery_Variable = character(),
+  Correlation = numeric(),
+  R_Squared = numeric(),
+  P_Value = numeric(),
+  Significance = character()
+)
+
+# First unlist the PreHA_HTT1_AveHR variable once
+x_values <- unlist(data_htt2_wide$PostHA_HTT2_MaxHR)
+
+for (var in recovery_vars) {
+  if (var %in% colnames(data_htt2_wide)) {
+    # Extract numeric values from the list variable
+    var_values <- unlist(data_htt2_wide[[var]])
+    
+    # Check if both variables have numeric values
+    if (is.numeric(x_values) && is.numeric(var_values)) {
+      tryCatch({
+        # Perform correlation test with the unlisted values
+        cor_test <- cor.test(
+          x_values,
+          var_values,
+          method = "spearman",
+          use = "pairwise.complete.obs"
+        )
+        
+        # Calculate r²
+        r_squared <- cor_test$estimate^2
+        
+        # Determine significance level
+        significance <- ifelse(cor_test$p.value < 0.001, "***",
+                               ifelse(cor_test$p.value < 0.01, "**",
+                                      ifelse(cor_test$p.value < 0.05, "*", "ns")))
+        
+        # Store the result
+        cor_results <- rbind(cor_results, data.frame(
+          Recovery_Variable = var,
+          Correlation = cor_test$estimate,
+          R_Squared = r_squared,
+          P_Value = cor_test$p.value,
+          Significance = significance
+        ))
+      }, error = function(e) {
+        warning(sprintf("Error processing variable %s: %s", var, e$message))
+      })
+    } else {
+      warning(sprintf("Could not extract numeric values from %s or PreHA_HTT1_AveHR", var))
+    }
+  }
+}
+
+# View the correlation results
+print(cor_results)
+
+
+# Create a formatted table
+kable(cor_results, 
+      caption = "Spearman Correlation Analysis: PostHA_HTT2_MaxHR vs Recovery Variables",
+      col.names = c("Recovery Variable", "Correlation (r)", "R²", "P-value", "Sig. Level"))
+
+
+# Load existing Excel file (if it exists)
+file_path <- "02172025_spearman correlation_results.xlsx"
+
+if (file.exists(file_path)) {
+  wb <- loadWorkbook(file_path)  # Load existing workbook
+} else {
+  wb <- createWorkbook()  # Create a new workbook if the file doesn't exist
+}
+
+# Add a new sheet
+addWorksheet(wb, "PostHA_HTT2_MaxHR")  
+
+# Write new data to the new sheet
+writeData(wb, sheet = "PostHA_HTT2_MaxHR", cor_results)
+
+# Save the updated workbook
+saveWorkbook(wb, file_path, overwrite = TRUE)
+
+####### correlation analysis by sex ####
+library(dplyr)
+library(tidyr)
+library(writexl)
+
+# Define recovery variables
+recovery_vars <- c("postHA_HTT1_HRV", "postHA_HTT1_RHR", "postHA_HTT1_TST", "postHA_HTT1_REM", 
+                   "postHA_HTT1_DEEP", "postHA_HTT1_LIGHT", "postHA_HTT1_SE", "postHA_HTT1_Rest", "postHA_HTT1_TIB")
+
+# Function to compute correlation for a given sex
+compute_correlation <- function(data, sex_label) {
+  # Filter dataset for the given sex
+  data_sex <- data %>% filter(Sex_1M_2F == sex_label)
+  
+  # Convert to wide format
+  data_sex_wide <- data_sex %>%
+    pivot_wider(names_from = Days, values_from = values)
+  
+  # Check if necessary variable exists
+  if (!"PostHA_HTT1_MaxHR" %in% colnames(data_sex_wide)) {
+    warning(paste("PostHA_HTT1_MaxHR not found for", sex_label))
+    return(NULL)
+  }
+  
+  # Extract x_values
+  x_values <- unlist(data_sex_wide$PostHA_HTT1_T120_Trec)
+  
+  # Create empty dataframe for results
+  cor_results <- data.frame(
+    Recovery_Variable = character(),
+    Correlation = numeric(),
+    R_Squared = numeric(),
+    P_Value = numeric(),
+    Significance = character(),
+    Sex = character()
+  )
+  
+  # Loop through recovery variables
+  for (var in recovery_vars) {
+    if (var %in% colnames(data_sex_wide)) {
+      var_values <- unlist(data_sex_wide[[var]])
+      
+      if (is.numeric(x_values) && is.numeric(var_values)) {
+        tryCatch({
+          cor_test <- cor.test(x_values, var_values, method = "pearson", use = "pairwise.complete.obs")
+          
+          r_squared <- cor_test$estimate^2
+          
+          significance <- ifelse(cor_test$p.value < 0.001, "***",
+                                 ifelse(cor_test$p.value < 0.01, "**",
+                                        ifelse(cor_test$p.value < 0.05, "*", "ns")))
+          
+          cor_results <- rbind(cor_results, data.frame(
+            Recovery_Variable = var,
+            Correlation = cor_test$estimate,
+            R_Squared = r_squared,
+            P_Value = cor_test$p.value,
+            Significance = significance,
+            Sex = sex_label
+          ))
+        }, error = function(e) {
+          warning(sprintf("Error processing variable %s for %s: %s", var, sex_label, e$message))
+        })
+      } else {
+        warning(sprintf("Could not extract numeric values from %s for %s", var, sex_label))
+      }
+    }
+  }
+  
+  return(cor_results)
+}
+
+# Run the correlation analysis for males and females
+cor_results_male <- compute_correlation(HRV_corr_clean, "1")
+cor_results_female <- compute_correlation(HRV_corr_clean, "2")
+
+# Combine results
+cor_results_all <- bind_rows(cor_results_male, cor_results_female)
+
+# Print results
+print(cor_results_all)
+
+kable(cor_results_all, 
+      caption = "pearson Correlation Analysis: PostHA_HTT1_T120_Trec vs Recovery Variables (Separated by Sex)",
+      col.names = c("Recovery Variable", "Correlation (r)", "R²", "P-value", "Sig. Level", "Sex"))
+
+# Save to Excel
+
+write_xlsx(cor_results_all, "021212025_spearman_correlation_results_sex.xlsx")
+
+file_path <- "021212025_spearman_correlation_results_sex.xlsx"
+
+if (file.exists(file_path)) {
+  wb <- loadWorkbook(file_path)  # Load existing workbook
+} else {
+  wb <- createWorkbook()  # Create a new workbook if the file doesn't exist
+}
+# Add a new sheet
+addWorksheet(wb, "PostHA_HTT1_T120_Trec_pearson")  
+
+# Write new data to the new sheet
+writeData(wb, sheet = "PostHA_HTT1_T120_Trec", cor_results_all)
+
+# Save the updated workbook
+saveWorkbook(wb, file_path, overwrite = TRUE)
+
+
+####### correlation analysis by responder non responder ####
+responder_groups <- list(
+  Low  = filter(data_htt2_wide, Responder_1L_2M_3H == 1),
+  Mid   = filter(data_htt2_wide, Responder_1L_2M_3H == 2),
+  High   = filter(data_htt2_wide, Responder_1L_2M_3H == 3))
+
+# Define the recovery variables
+recovery_vars_2 <- c("HTT2_HRV", "HTT2_RHR", "HTT2_TST", "HTT2_REM", "HTT2_DEEP", "HTT2_LIGHT", "HTT2_SE", "HTT2_Rest", "HTT2_TIB")
+
+# Function to compute correlations for each group
+compute_correlations <- function(group_data, group_name) {
+  # Ensure numeric types
+  group_data$PreHA_HTT1_AveHR <- as.numeric(group_data$PreHA_HTT2_MaxHR)
+  
+  # Convert recovery variables to numeric if needed
+  group_data[recovery_vars_2] <- lapply(group_data[recovery_vars_2], as.numeric)
+  
+  map_df(recovery_vars_2, function(var) {
+    if (var %in% colnames(group_data)) {
+      cor_test <- cor.test(group_data$PreHA_HTT1_AveHR, group_data[[var]], method = "spearman", use = "pairwise.complete.obs")
+      
+      tibble(
+        Group = group_name,
+        Recovery_Variable = var, 
+        Correlation = cor_test$estimate, 
+        R_Squared = cor_test$estimate^2, 
+        P_Value = cor_test$p.value,
+        Significance = case_when(
+          cor_test$p.value < 0.001 ~ "***",
+          cor_test$p.value < 0.01  ~ "**",
+          cor_test$p.value < 0.05  ~ "*",
+          TRUE ~ "ns"
+        )
+      )
+    }
+  })
+}
+
+# Apply function to all groups and combine results
+cor_results <- imap_dfr(responder_groups, compute_correlations)
+
+
+# Print results
+print(cor_results)
+
+# Generate nicely formatted table
+kable(cor_results, 
+      caption = "Spearman Correlation Analysis: PreHA_HTT2_MaxHR vs Recovery Variables",
+      col.names = c("Group", "Recovery Variable", "Correlation (r)", "R²", "P-value", "Sig. Level"))
+
+write_xlsx(cor_results,"02172025_Spearman Correlation responders.xlsx")
+
+file_path <- "02172025_Spearman Correlation responders.xlsx"
+
+if (file.exists(file_path)) {
+  wb <- loadWorkbook(file_path)  # Load existing workbook
+} else {
+  wb <- createWorkbook()  # Create a new workbook if the file doesn't exist
+}
+# Add a new sheet
+addWorksheet(wb, "PreHA_HTT2_MaxHR")  
+
+# Write new data to the new sheet
+writeData(wb, sheet = "PreHA_HTT2_MaxHR", cor_results)
+
+# Save the updated workbook
+saveWorkbook(wb, file_path, overwrite = TRUE)
+
+######### data check #########
+# Check number of complete pairs used in R
+complete_pairs <- sum(!is.na(hr_values) & !is.na(unlist(data_preHAhtt1_wide$postHA_HTT1_HRV)))
+print(paste("Number of complete pairs used in R:", complete_pairs))
+
+# Get both variables
+hrv_values <- unlist(data_preHAhtt1_wide$postHA_HTT1_HRV)
+
+# Print lengths and number of complete pairs
+cat("Length of HR values:", length(hr_values), "\n")
+cat("Length of HRV values:", length(hrv_values), "\n")
+
+# Count complete pairs (non-NA)
+complete_pairs <- sum(!is.na(hr_values) & !is.na(hrv_values))
+cat("Number of complete pairs:", complete_pairs, "\n")
+
+# Look at the actual paired data
+complete_data <- data.frame(
+  HR = hr_values,
+  HRV = hrv_values
+) %>% na.omit()
+
+print("Complete pairs used in correlation:")
+print(complete_data)
