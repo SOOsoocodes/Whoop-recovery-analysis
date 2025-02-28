@@ -1,0 +1,1523 @@
+#####load packages#####
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(tidyr)
+library(DataExplorer)
+library(writexl)
+library(knitr)
+library(gt)
+library(dplyr)
+library(broom)
+library(kableExtra)
+library(ggplot2)
+library(reshape2)
+library(patchwork)
+library(cocor)
+library(interactions)
+
+#######load the data into R and clean#######
+Recovery_analysis <- read_xlsx(file.choose())
+Recovery_clean <- Recovery_analysis %>% 
+  rename(
+    supplement = Supplement_3None_4BC_5CR,
+    sex = Sex_1M_2F) %>% 
+  select(-Age, -Height_cm, -Body_Mass_kg, -USG_PRE, -Urine_Color_PRE, -SBP_mmHg, -DBP_mmHg, -Resting_HR, -vVO2max, -PREHA_HTT1_1P_2F,
+         -PREHA_HTT2_1P_2F)
+Recovery_clean$supplement <- as.factor(Recovery_clean$supplement)
+levels(Recovery_clean$supplement)
+
+write_xlsx(Recovery_clean, "01132025 master correlation WHOOP.xlsx")
+
+#turn data set into long format
+Recovery_long <- Recovery_analysis %>% 
+  pivot_longer(cols = matches("PRE|POST|HTT"),
+               names_to = "Days",
+               values_to = "recoveryvalues")
+Recovery_long$Days <-as.factor(Recovery_long$Days)
+
+#check missing data points
+missing_data <- Recovery_long %>%
+  group_by(SUB, supplement) %>%
+  summarise(n = n()) %>%
+  spread(supplement, n, fill = 0)
+
+print(missing_data)
+
+#######filtered data set#######
+HRV_recovery <- Recovery_long %>% 
+  filter(grepl("HRV", Days))
+RHR_recovery <- Recovery_long %>% 
+  filter(grepl("RHR", Days))
+TST_recovery <- Recovery_long %>% 
+  filter(grepl("TST", Days))
+REM_recovery <- Recovery_long %>% 
+  filter(grepl("REM", Days))
+DEEP_recovery <- Recovery_long %>% 
+  filter(grepl("DEEP", Days))
+LIGHT_recovery <- Recovery_long %>% 
+  filter(grepl("LIGHT", Days))
+SE_recovery <- Recovery_long %>% 
+  filter(grepl("SE", Days))
+TIB_recovery <- Recovery_long %>% 
+  filter(grepl("TIB", Days))
+
+write_xlsx(list(Sheet1 = HRV_recovery, Sheet2 = RHR_recovery, Sheet3 = TST_recovery,
+                Sheet4 = REM_recovery, Sheet5 = DEEP_recovery, Sheet6 = LIGHT_recovery,
+                Sheet7 = SE_recovery), "Recovery one way ANOVA")
+
+# #repeated measures anova
+# anova_HRV <- aov(recoveryvalues ~ Days + Error(SUB/Days), data = HRV_recovery)
+# summary(anova_HRV)
+# 
+# anova_RHR <- aov(recoveryvalues ~ Days + Error(SUB/Days), data = RHR_recovery)
+# summary(anova_RHR)
+
+#######TTESTS w BONFERRONI CORRECTION ######
+pairwise_ttest_HRV <- pairwise.t.test(HRV_recovery$recoveryvalues, HRV_recovery$Days, #but should you do bonferroni correction?
+                                      p.adjust.method = "BH", paired = TRUE)
+pairwise_ttest_RHR <- pairwise.t.test(RHR_recovery$recoveryvalues, RHR_recovery$Days, 
+                                      p.adjust.method = "BH", paired = TRUE)
+pairwise_ttest_TST <- pairwise.t.test(TST_recovery$recoveryvalues, TST_recovery$Days, 
+                                      p.adjust.method = "BH", paired = TRUE)
+pairwise_ttest_REM <- pairwise.t.test(REM_recovery$recoveryvalues, REM_recovery$Days, 
+                                      p.adjust.method = "BH", paired = TRUE)
+pairwise_ttest_DEEP <- pairwise.t.test(DEEP_recovery$recoveryvalues, DEEP_recovery$Days, 
+                                      p.adjust.method = "BH", paired = TRUE)
+pairwise_ttest_LIGHT <- pairwise.t.test(LIGHT_recovery$recoveryvalues, LIGHT_recovery$Days, 
+                                      p.adjust.method = "BH", paired = TRUE)
+pairwise_ttest_SE <- pairwise.t.test(SE_recovery$recoveryvalues, SE_recovery$Days, 
+                                      p.adjust.method = "BH", paired = TRUE)
+pairwise_ttest_TIB <- pairwise.t.test(TIB_recovery$recoveryvalues, TIB_recovery$Days, 
+                                     p.adjust.method = "BH", paired = TRUE)
+#organize into a table
+if (!require(broom)) install.packages("broom")
+if (!require(dplyr)) install.packages("dplyr")
+if (!require(kableExtra)) install.packages("kableExtra")
+
+library(broom)
+library(dplyr)
+library(kableExtra)
+
+# Function to extract results from pairwise t-test
+extract_pairwise_results <- function(test_result, test_name) {
+  tidy_result <- tidy(test_result) %>%
+    mutate(test = test_name,
+           comparison = paste(group1, group2, sep = " vs "))
+  return(tidy_result)
+}
+
+# Extract results from each test
+hrv_results <- extract_pairwise_results(pairwise_ttest_HRV, "HRV")
+rhr_results <- extract_pairwise_results(pairwise_ttest_RHR, "RHR")
+tst_results <- extract_pairwise_results(pairwise_ttest_TST, "TST")
+REM_results <- extract_pairwise_results(pairwise_ttest_REM, "REM")
+DEEP_results <- extract_pairwise_results(pairwise_ttest_DEEP, "DEEP")
+LIGHT_results <- extract_pairwise_results(pairwise_ttest_LIGHT, "LIGHT")
+SE_results <- extract_pairwise_results(pairwise_ttest_SE, "SE")
+TIB_reults <- extract_pairwise_results(pairwise_ttest_TIB, "TIB")
+
+write_xlsx(TIB_reults, "pairwise_comparison_results_bonferroni_TIB.xlsx")
+
+# Combine all results
+all_results <- bind_rows(hrv_results, rhr_results, tst_results, REM_results, DEEP_results, LIGHT_results,
+                         SE_results,TIB_reults )
+
+# Create a wide format table
+# wide_results <- all_results %>%
+#   select(test, comparison, p.value) %>%
+#   pivot_wider(names_from = test, values_from = p.value) %>%
+#   arrange(comparison)
+# 
+# # Create a formatted table
+# formatted_table <- wide_results %>%
+#   mutate(across(c(HRV, RHR, TST), ~format.pval(., digits = 3))) %>%
+#   kable(format = "html", caption = "Pairwise t-test Results") %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+#   add_header_above(c(" " = 1, "Test" = 3))
+# 
+# # Print the table
+# print(formatted_table)
+# 
+# ##long format
+# extract_pairwise_results <- function(test_result, test_name) {
+#   tidy_result <- tidy(test_result) %>%
+#     mutate(test = test_name)
+#   return(tidy_result)
+# }
+# 
+# # Create a formatted table
+# formatted_table_long <- all_results %>%
+#   mutate(p.value = format.pval(p.value, digits = 3)) %>%
+#   select(test, group1, group2, p.value) %>%
+#   arrange(test, group1, group2) %>%
+#   kable(format = "html", caption = "Pairwise t-test Results") %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+#   collapse_rows(columns = 1, valign = "top")
+# 
+# # Print the table
+# print(formatted_table_long)
+
+formatted_table_long <- all_results %>%
+  # First do all data frame operations
+  mutate(
+    significant = p.value < 0.05,  # Create significance indicator before formatting p-values
+    p.value = case_when(
+      p.value < 0.001 ~ sprintf("<0.001***"),
+      p.value < 0.01 ~ sprintf("%.3f**", p.value),
+      p.value < 0.05 ~ sprintf("%.3f*", p.value),
+      TRUE ~ sprintf("%.3f", p.value)
+    )
+  ) %>%
+  select(test, group1, group2, p.value, significant) %>%
+  arrange(test, group1, group2) %>%
+  # Then create and format the table
+  kable(
+    format = "html",
+    caption = "Pairwise Comparisons Across Recovery Measures",
+    col.names = c("Variable", "Time Point 1", "Time Point 2", "P-value"),
+    align = c("l", "l", "l", "r")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "left"
+  ) %>%
+  # Add column styling for significant p-values
+  column_spec(4, 
+              background = ifelse(all_results$p.value < 0.05, "#E8F4F9", "white")) %>%
+  # Group by each variable
+  pack_rows(index = table(all_results$test)) %>%
+  # Add header styling
+  row_spec(0, bold = TRUE, background = "#E8E8E8") %>%
+  # Add footnote
+  footnote(
+    symbol = c(
+      "* p < 0.05",
+      "** p < 0.01",
+      "*** p < 0.001"
+    ),
+    footnote_as_chunk = TRUE
+  ) %>%
+  scroll_box(width = "100%", height = "500px")
+
+formatted_table_long <- all_results %>%
+  # First do all data frame operations
+  mutate(
+    significant = p.value < 0.05,  # Create significance indicator before formatting p-values
+    p.value = case_when(
+      p.value < 0.001 ~ sprintf("<0.001***"),
+      p.value < 0.01 ~ sprintf("%.3f**", p.value),
+      p.value < 0.05 ~ sprintf("%.3f*", p.value),
+      TRUE ~ sprintf("%.3f", p.value)
+    )
+  ) %>%
+  select(test, group1, group2, p.value) %>%  # Removed 'significant' as it's only needed for styling
+  arrange(test, group1, group2) %>%
+  # Then create and format the table
+  kable(
+    format = "html",
+    caption = "Pairwise Comparisons Across Recovery Measures",
+    col.names = c("Variable", "Time Point 1", "Time Point 2", "P-value"),
+    align = c("l", "l", "l", "r")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "left"
+  ) %>%
+  # Add column styling for significant p-values
+  column_spec(4, 
+             background = ifelse(all_results$p.value < 0.05, "#E8F4F9", "white")) %>%
+  # Group by each variable
+  pack_rows(index = table(all_results$test)) %>%
+  # Add header styling
+  row_spec(0, bold = TRUE, background = "#E8E8E8") %>%
+  # Add footnote
+  footnote(
+    symbol = c(
+      "* p < 0.05",
+      "** p < 0.01",
+      "*** p < 0.001"
+    ),
+    footnote_as_chunk = TRUE
+  ) %>%
+  scroll_box(width = "100%", height = "500px")
+
+# Print the table
+print(formatted_table_long)
+# save to a file
+# First create a clean version of the data for Excel
+excel_version <- all_results %>%
+  mutate(
+    p.value = case_when(
+      p.value < 0.001 ~ "<0.001***",
+      p.value < 0.01 ~ sprintf("%.3f**", p.value),
+      p.value < 0.05 ~ sprintf("%.3f*", p.value),
+      TRUE ~ sprintf("%.3f", p.value)
+    )
+  ) %>%
+  select(test, group1, group2, p.value) %>%
+  rename(
+    Variable = test,
+    "Time Point 1" = group1,
+    "Time Point 2" = group2,
+    "P-value" = p.value
+  )
+
+# Save to Excel
+write_xlsx(excel_version, "pairwise_comparison_results BH.xlsx")
+write_xlsx(excel_version, "pairwise_comparison_results_bonferroni.xlsx")
+
+# First, let's create a function to do pairwise comparisons between groups at each time point
+compare_groups_by_time <- function(data, value_col, group_col, time_col) {
+  # Get unique time points
+  time_points <- unique(data[[time_col]])
+  
+  # Create empty list to store results
+  results <- list()
+  
+  # For each time point
+  for(time in time_points) {
+    # Subset data for this time point
+    subset_data <- data[data[[time_col]] == time, ]
+    
+    # Perform t-test
+    test_result <- pairwise.t.test(
+      subset_data[[value_col]], 
+      subset_data[[group_col]],
+      p.adjust.method = "none"  # or "bonferroni" if you want to correct for multiple comparisons
+    )
+    
+    results[[time]] <- test_result
+  }
+  
+  return(results)
+}
+
+# Now apply this to each of your variables
+# Assuming your data frames have columns: recoveryvalues, supplement (groups 3,4,5), and Days
+
+HRV_results <- compare_groups_by_time(
+  HRV_recovery, 
+  value_col = "recoveryvalues",
+  group_col = "supplement",  # or whatever your group column is named
+  time_col = "Days"
+)
+
+RHR_results <- compare_groups_by_time(
+  RHR_recovery, 
+  value_col = "recoveryvalues",
+  group_col = "supplement",
+  time_col = "Days"
+)
+tst_results <- compare_groups_by_time(
+  TST_recovery, 
+  value_col = "recoveryvalues",
+  group_col = "supplement",
+  time_col = "Days"
+)
+rem_results <- compare_groups_by_time(
+  REM_recovery, 
+  value_col = "recoveryvalues",
+  group_col = "supplement",
+  time_col = "Days"
+)
+deep_results <- compare_groups_by_time(
+  DEEP_recovery, 
+  value_col = "recoveryvalues",
+  group_col = "supplement",
+  time_col = "Days"
+)
+light_results <- compare_groups_by_time(
+  LIGHT_recovery, 
+  value_col = "recoveryvalues",
+  group_col = "supplement",
+  time_col = "Days"
+)
+se_results <- compare_groups_by_time(
+  SE_recovery, 
+  value_col = "recoveryvalues",
+  group_col = "supplement",
+  time_col = "Days"
+)
+
+# Repeat for other variables...
+
+# To extract the results in a more readable format
+extract_results <- function(results_list, variable_name) {
+  results_df <- data.frame()
+  
+  for(time in names(results_list)) {
+    p_values <- results_list[[time]]$p.value
+    # Get the row and column names from the p-value matrix
+    groups1 <- rownames(p_values)
+    
+    for(i in seq_along(groups1)) {
+      for(j in seq_along(p_values[i,])) {
+        if(!is.na(p_values[i,j])) {
+          results_df <- rbind(results_df, data.frame(
+            test = variable_name,
+            timepoint = time,
+            group1 = groups1[i],
+            group2 = colnames(p_values)[j],
+            p.value = p_values[i,j]
+          ))
+        }
+      }
+    }
+  }
+  
+  return(results_df)
+}
+
+# Extract results for each variable
+HRV_table <- extract_results(HRV_results, "HRV")
+RHR_table <- extract_results(RHR_results, "RHR")
+tst_table <- extract_results(tst_results, "TST")
+rem_table <- extract_results(rem_results, "REM")
+deep_table <- extract_results(deep_results, "DEEP")
+light_table <- extract_results(light_results, "LIGHT")
+SE_table <- extract_results(se_results, "SE")
+# ... repeat for other variables
+
+# Combine all results
+all_results <- rbind(HRV_table, RHR_table, tst_table, rem_table, deep_table, light_table, SE_table)  
+
+formatted_table_long <- all_results %>%
+  mutate(
+    p.value = case_when(
+      p.value < 0.001 ~ sprintf("<0.001***"),
+      p.value < 0.01 ~ sprintf("%.3f**", p.value),
+      p.value < 0.05 ~ sprintf("%.3f*", p.value),
+      TRUE ~ sprintf("%.3f", p.value)
+    )
+  ) %>%
+  select(test, timepoint, group1, group2, p.value) %>%
+  arrange(test, timepoint, group1, group2) %>%
+  kable(
+    format = "html",
+    caption = "Between-Group Comparisons at Each Time Point",
+    col.names = c("Variable", "Time Point", "Group 1", "Group 2", "P-value"),
+    align = c("l", "l", "l", "l", "r")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  ) %>%
+  pack_rows(index = table(all_results$test))
+
+# Create clean version for Excel
+excel_version2 <- all_results %>%
+  mutate(
+    p.value = case_when(
+      p.value < 0.001 ~ "<0.001***",
+      p.value < 0.01 ~ sprintf("%.3f**", p.value),
+      p.value < 0.05 ~ sprintf("%.3f*", p.value),
+      TRUE ~ sprintf("%.3f", p.value)
+    )
+  ) %>%
+  select(test, timepoint, group1, group2, p.value) %>%
+  rename(
+    Variable = test,
+    "Time Point" = timepoint,
+    "Group 1" = group1,
+    "Group 2" = group2,
+    "P-value" = p.value
+  )
+
+# Save to Excel
+write_xlsx(excel_version2, "between_groups_comparison_results.xlsx")
+
+#test noramlity of data and distribution
+#create_report(Recovery_analysis)
+#shapiro.test(Recovery_long$recoveryvalues) ##HRV is not normally distributed
+
+#since data is not normal you should run non parametric anova:friedman
+#friedman_test_result <- friedman.test(recoveryvalues ~ supplement | SUB, data = Recovery_long)
+#print(friedman_test_result)
+
+#run linear mixed effects model with filtered dataset
+
+#lmm for HRV
+#hrv_lmm <- lmer(recoveryvalues ~ supplement * Days +(1|SUB), data = HRV_recovery)
+#summary(hrv_lmm)
+
+#pairwise.wilcox.test(HRV_recovery$recoveryvalues, HRV_recovery$Days, p.adjust.method = "none")
+
+
+####### charts for each stages of sleep by time point and groups################################
+sleep_analysis <- read_xlsx(file.choose())
+
+long_sleep <- sleep_analysis %>% 
+  pivot_longer(cols = c(REM, LIGHT, DEEP), names_to = "Sleep_stage", values_to = "Duration") %>% 
+  group_by(GROUP, TIME) %>% 
+  mutate(Total_sleep = sum(Duration[Sleep_stage %in% c("REM", "LIGHT", "DEEP")])) %>% 
+  mutate(Percentage = (Duration / Total_sleep) * 100) %>% 
+  mutate(TIME = factor(TIME, levels = c("PREB2", "POSTB2", "POSTB3", "PREHA1", "POSTHA1", "POSTHA2",
+                                        "POSTHA3", "POSTHA4", "POSTHA5", "PREDAY9", "POSTDAY9", "POSTDAY10", "Average"))) %>% 
+  ungroup()
+
+####bar graph 1=BC; 2=Cr; 3=Control
+
+custom_colors <- c(
+  "REM" = "#FF9999",   # Light red for REM
+  "LIGHT" = "#99CCFF", # Light blue for LIGHT
+  "DEEP" = "#66FF66"   # Light green for DEEP
+)
+
+ggplot(long_sleep, aes(x = "", y = Duration, fill = Sleep_stage)) +  # Fill by Sleep_stage
+  geom_bar(stat = "identity", width = 1) + 
+  facet_grid(GROUP ~ TIME) +
+  theme_void() +
+  labs(title = "Sleep Stages Distribution by Group and Day", fill = "Sleep Stage") +
+  geom_text(aes(label = sprintf("%.1f%%", Percentage)),  # Display percentages only
+            color = "black",
+            position = position_stack(vjust = 0.5)) +  # Centers the labels within the slices
+  scale_fill_manual(values = custom_colors)
+
+###bar graph for change day to day/ from baseline
+custom_colors <- c(
+  "DayChangeREM" = "#FF9999",   # Light red for REM
+  "DayChangeLIGHT" = "#99CCFF", # Light blue for LIGHT
+  "DayChangeDEEP" = "#66FF66"   # Light green for DEEP
+)
+
+change_sleep_analysis <- read_xlsx(file.choose())
+change_clean_long <- change_sleep_analysis[,-c(1:7, 13:19)] %>% 
+  pivot_longer(cols = c(DayChangeREM, DayChangeDEEP, DayChangeLIGHT), names_to = "sleep_stage", values_to = "Sleep_change") %>% 
+  group_by(GROUP...9, TIME...8) %>% 
+  mutate(TIME...8 = factor(TIME...8, levels = c("PREB2", "POSTB2", "POSTB3", "PREHA1", "POSTHA1", "POSTHA2",
+                                                "POSTHA3", "POSTHA4", "POSTHA5", "PREDAY9", "POSTDAY9", "POSTDAY10"))) %>% 
+  ungroup() %>% 
+  drop_na() %>% 
+  rename(GROUP = GROUP...9,
+         TIME = TIME...8) %>% 
+  mutate(TIME = as.factor(TIME),
+         GROUP = as.factor(GROUP))
+
+ggplot(change_clean_long %>% filter(sleep_stage == "DayChangeREM"),
+       aes(x = TIME, y= Sleep_change, fill = GROUP)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "Change in REM sleep across different groups",
+       x = "Days",
+       y = "Change in REM sleep(h)",
+       fill = "Group") +
+  scale_y_continuous(breaks = seq(min(change_clean_long$Sleep_change, na.rm = TRUE), 
+                                  max(change_clean_long$Sleep_change, na.rm = TRUE), 
+                                  by = 0.1)) +  # Set y-axis breaks every 0.1
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+###bar graph for change from baseline
+basechange_clean_long <- change_sleep_analysis[,-c(1:14)] %>% 
+  pivot_longer(cols = c(BASEchangeREM, BASEchangeDEEP, BASEchangeLIGHT), names_to = "sleep_stage", values_to = "Sleep_change") %>% 
+  group_by(GROUP...16, TIME...15) %>% 
+  mutate(TIME...15 = factor(TIME...15, levels = c("PREB2", "POSTB2", "POSTB3", "PREHA1", "POSTHA1", "POSTHA2",
+                                                "POSTHA3", "POSTHA4", "POSTHA5", "PREDAY9", "POSTDAY9", "POSTDAY10"))) %>% 
+  ungroup() %>% 
+  drop_na() %>% 
+  rename(GROUP = GROUP...16,
+         TIME = TIME...15) %>% 
+  mutate(TIME = as.factor(TIME),
+         GROUP = as.factor(GROUP))
+
+ggplot(basechange_clean_long %>% filter(sleep_stage == "BASEchangeLIGHT"),
+       aes(x = TIME, y= Sleep_change, fill = GROUP)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "Change in LIGHT from baseline (PREB2) sleep across different groups",
+       x = "Days",
+       y = "Change in LIGHT sleep(h)",
+       fill = "Group") +
+  scale_y_continuous(breaks = seq(min(change_clean_long$Sleep_change, na.rm = TRUE), 
+                                  max(change_clean_long$Sleep_change, na.rm = TRUE), 
+                                  by = 0.1)) +  # Set y-axis breaks every 0.1
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+#######Pie chart for each sleep stage####
+install.packages("highcharter")
+install.packages("purrr")
+install.packages("htmltools")
+install.packages("htmlwidgets")
+library(htmltools)
+library(highcharter)
+library(purrr)
+library(htmlwidgets)
+
+
+hchart(long_sleep, "pie", hcaes(name = Sleep_stage, y = Percentage, group = GROUP)) %>% 
+  hc_title(text = "sleep stages percentage") %>% 
+  hc_add_theme(hc_theme_flat())
+
+
+create_pie_chart <- function(data, group, time) {
+  hchart(
+    data %>% filter(GROUP == group, TIME == time),
+    "pie", hcaes(name = Sleep_stage, y = Percentage)
+  ) %>% 
+    hc_title(text = paste("Sleep Stages for Group", group, "on Day", time)) %>% 
+    hc_add_theme(hc_theme_flat()) %>% 
+    hc_plotOptions(pie = list(
+      dataLabels = list(
+        enabled = TRUE,
+        format = '{point.name}: {point.percentage:.1f} %'  # Displays percentage with one decimal
+      )
+    ))
+}
+
+# Get unique combinations of GROUP and TIME
+group_time_combinations <- long_sleep %>% 
+  distinct(GROUP, TIME)
+
+# Create and store pie charts for each combination of GROUP and TIME
+pie_charts <- map2(
+  group_time_combinations$GROUP, 
+  group_time_combinations$TIME, 
+  ~create_pie_chart(long_sleep, .x, .y)
+)
+
+# Arrange pie charts side by side, adjusting the number of columns
+# Wrap them in div containers to control the layout
+pie_chart_grid <- div(
+  style = "display: flex; flex-wrap: wrap;",
+  map(pie_charts, ~div(style = "width: 33%; padding: 10px;", .x)) # Adjust width to set columns
+)
+
+# Display all pie charts side by side
+browsable(pie_chart_grid)
+saveWidget(pie_chart_grid, "sleep_stages_pie_charts.html")
+
+
+
+
+####### One waya ANOVA for day to day change in sleep #####
+change_sleep_analysis <- read_xlsx(file.choose())
+change_clean_long <- change_sleep_analysis[,-c(1:7, 13:19)] %>% 
+  pivot_longer(cols = c(DayChangeREM, DayChangeDEEP, DayChangeLIGHT), names_to = "sleep_stage", values_to = "Sleep_change") %>% 
+  group_by(GROUP...9, TIME...8) %>% 
+  mutate(TIME...8 = factor(TIME...8, levels = c("PREB2", "POSTB2", "POSTB3", "PREHA1", "POSTHA1", "POSTHA2",
+                                                "POSTHA3", "POSTHA4", "POSTHA5", "PREDAY9", "POSTDAY9", "POSTDAY10"))) %>% 
+  ungroup() %>% 
+  drop_na() %>% 
+  rename(GROUP = GROUP...9,
+         TIME = TIME...8) %>% 
+  mutate(TIME = as.factor(TIME),
+         GROUP = as.factor(GROUP))
+
+daychange_anova <- change_clean_long %>%
+  group_by(sleep_stage) %>%  # Analyze each sleep stage separately
+  summarise(
+    anova = list(aov(Sleep_change ~ TIME, data = cur_data())),
+    tukey = list(TukeyHSD(aov(Sleep_change ~ TIME, data = cur_data())))
+  )
+
+library(purrr)
+anova_summaries <- map(daychange_anova$anova, summary)
+tukey_results <- lapply(daychange_anova$tukey, function(tukey_result) {
+  as.data.frame(tukey_result$TIME)  # Extracting the TIME comparisons from Tukey results
+})
+
+# Print results for each sleep stage
+for (i in 1:length(tukey_results)) {
+  cat("\nTukey Results for Sleep Stage:", daychange_anova$sleep_stage[i], "\n")
+  print(tukey_results[[i]])
+}
+
+anova_by_time <- change_clean_long %>%
+  group_by(TIME) %>%  # Group by time points
+  summarise(
+    anova = list(aov(Sleep_change ~ GROUP, data = cur_data())),
+    tukey = list(ifelse(summary(aov(Sleep_change ~ GROUP, data = cur_data()))[[1]][["Pr(>F)"]][1] < 0.05,
+                        TukeyHSD(aov(Sleep_change ~ GROUP, data = cur_data()))$GROUP, 
+                        NA))
+  )
+####### analysis for change from baseline #####
+basechange_clean_long <- change_sleep_analysis[,-c(1:14)] %>% 
+  pivot_longer(cols = c(BASEchangeREM, BASEchangeDEEP, BASEchangeLIGHT), names_to = "sleep_stage", values_to = "Sleep_change") %>% 
+  group_by(GROUP...16, TIME...15) %>% 
+  mutate(TIME...15 = factor(TIME...15, levels = c("PREB2", "POSTB2", "POSTB3", "PREHA1", "POSTHA1", "POSTHA2",
+                                                  "POSTHA3", "POSTHA4", "POSTHA5", "PREDAY9", "POSTDAY9", "POSTDAY10"))) %>% 
+  ungroup() %>% 
+  drop_na() %>% 
+  rename(GROUP = GROUP...16,
+         TIME = TIME...15) %>% 
+  mutate(TIME = as.factor(TIME),
+         GROUP = as.factor(GROUP))
+
+# Ensure basechange_anova calculates the ANOVA and Tukey results correctly
+basechange_anova <- basechange_clean_long %>% 
+  group_by(sleep_stage) %>% 
+  summarise(
+    anova = list(aov(Sleep_change ~ GROUP + TIME, data = cur_data())),
+    tukey = list(TukeyHSD(aov(Sleep_change ~ GROUP + TIME, data = cur_data()))$TIME)
+  )
+
+# Extract and format ANOVA summaries
+anova_results_base <- map(baseanova_by_time$anova, summary)
+
+# Extract and format Tukey results as data frames for each sleep stage
+tukey_results_base <- map(baseanova_by_time$tukey, as.data.frame)
+
+# Combine results into a table with each sleep stage
+combined_results <- tibble(
+  sleep_stage = basechange_anova$sleep_stage,
+  anova_summary = anova_results_base,
+  tukey_summary = tukey_results_base
+)
+
+# Print each sleep stage's ANOVA and Tukey results in an organized manner
+for (i in seq_along(combined_results$sleep_stage)) {
+  cat("\nANOVA Results for Sleep Stage:", combined_results$sleep_stage[i], "\n")
+  print(combined_results$anova_summary[[i]])
+  
+  cat("\nTukey HSD Results for Sleep Stage:", combined_results$sleep_stage[i], "\n")
+  print(combined_results$tukey_summary[[i]])
+}
+
+format_anova_tukey_results <- function(combined_results) {
+  # Create empty lists to store formatted results
+  all_anova_results <- list()
+  all_tukey_results <- list()
+  
+  # Process each sleep stage
+  for (i in seq_along(combined_results$sleep_stage)) {
+    stage <- combined_results$sleep_stage[i]
+    
+    # Format ANOVA results
+    anova_df <- as.data.frame(combined_results$anova_summary[[i]][[1]])
+    anova_df$sleep_stage <- stage
+    anova_df$metric <- rownames(anova_df)
+    anova_df <- anova_df %>%
+      select(sleep_stage, metric, everything())
+    all_anova_results[[i]] <- anova_df
+    
+    # Format Tukey results
+    tukey_df <- combined_results$tukey_summary[[i]]
+    tukey_df$sleep_stage <- stage
+    tukey_df$comparison <- rownames(tukey_df)
+    tukey_df <- tukey_df %>%
+      select(sleep_stage, comparison, everything())
+    all_tukey_results[[i]] <- tukey_df
+  }
+  
+  # Combine all results
+  final_anova <- bind_rows(all_anova_results)
+  final_tukey <- bind_rows(all_tukey_results)
+  
+  # Create Excel workbook
+  results_list <- list(
+    "ANOVA_Results" = final_anova,
+    "Tukey_Results" = final_tukey
+  )
+  
+  return(results_list)
+}
+
+basechange_anova <- basechange_clean_long %>% 
+  group_by(sleep_stage) %>%  # Group by sleep stage
+  summarise(
+    anova = list(aov(Sleep_change ~ TIME, data = cur_data())),  # One-way ANOVA looking only at TIME
+    tukey = list(TukeyHSD(aov(Sleep_change ~ TIME, data = cur_data())))  # Tukey's HSD for post-hoc comparisons if ANOVA is significant
+  )
+
+# Extract and format ANOVA summaries
+anova_results_base <- map(basechange_anova$anova, summary)
+
+# Extract and format Tukey results as data frames for each sleep stage
+tukey_results_base <- map(basechange_anova$tukey, function(tukey_result) {
+  as.data.frame(tukey_result$TIME)  # Extracting the TIME comparisons from Tukey results
+})
+
+# Combine results into a table with each sleep stage
+combined_results <- tibble(
+  sleep_stage = basechange_anova$sleep_stage,
+  anova_summary = anova_results_base,
+  tukey_summary = tukey_results_base
+)
+
+# Print each sleep stage's ANOVA and Tukey results in an organized manner
+for (i in seq_along(combined_results$sleep_stage)) {
+  cat("\nANOVA Results for Sleep Stage:", combined_results$sleep_stage[i], "\n")
+  print(combined_results$anova_summary[[i]])
+  
+  cat("\nTukey HSD Results for Sleep Stage:", combined_results$sleep_stage[i], "\n")
+  print(combined_results$tukey_summary[[i]])
+}
+
+save_results_to_excel <- function(combined_results, file_path) {
+  # Format ANOVA and Tukey results into data frames
+  formatted_results <- list(
+    "ANOVA_Results" = bind_rows(
+      lapply(seq_along(combined_results$sleep_stage), function(i) {
+        anova_df <- as.data.frame(combined_results$anova_summary[[i]][[1]])
+        anova_df$sleep_stage <- combined_results$sleep_stage[i]
+        return(anova_df)
+      })
+    ),
+    "Tukey_Results" = bind_rows(
+      lapply(seq_along(combined_results$sleep_stage), function(i) {
+        tukey_df <- combined_results$tukey_summary[[i]]
+        tukey_df$sleep_stage <- combined_results$sleep_stage[i]
+        return(tukey_df)
+      })
+    )
+  )
+  
+save_results_to_excel(combined_results, "sleep_analysis_baselinechange.xlsx")
+  # Write the results to an Excel file
+  write_xlsx(formatted_results, path = file_path)
+}
+
+# Use the function and save to Excel
+save_results_to_excel <- function(combined_results, file_path) {
+  formatted_results <- format_anova_tukey_results(combined_results)
+  write_xlsx(formatted_results, path = file_path)
+}
+
+save_results_to_excel(combined_results, "sleep_analysis_baselinechange.xlsx")
+
+######anova by time
+baseanova_by_time <- basechange_clean_long %>%
+  group_by(TIME) %>%  # Group by time points
+  summarise(
+    anova = list(aov(Sleep_change ~ GROUP, data = cur_data())),
+    tukey = list(ifelse(summary(aov(Sleep_change ~ GROUP, data = cur_data()))[[1]][["Pr(>F)"]][1] < 0.05,
+                        TukeyHSD(aov(Sleep_change ~ GROUP, data = cur_data()))$GROUP, 
+                        NA))
+  )
+baseanova_by_time <- basechange_clean_long %>%
+  group_by(TIME) %>%
+  summarise(
+    anova = list(aov(Sleep_change ~ GROUP, data = cur_data())),
+    .groups = 'drop' # Drop grouping to summarize results
+  ) %>%
+  mutate(
+    anova_summary = map(anova, ~ summary(.x)[[1]]),
+    p_value = map_dbl(anova_summary, ~ .x[["Pr(>F)"]][1]),
+    significant = p_value < 0.05,
+    tukey = ifelse(significant,
+                   map(anova, ~ TukeyHSD(.x)$GROUP),
+                   NA)
+  ) %>%
+  select(TIME, p_value, significant, tukey)
+
+# To extract and combine Tukey results into a data frame
+tukey_results <- baseanova_by_time %>%
+  filter(significant) %>%
+  unnest(tukey)
+
+# Combine ANOVA summary with Tukey results
+combined_results <- left_join(baseanova_by_time, tukey_results, by = "TIME")
+
+# View the combined results
+print(combined_results)
+
+
+
+
+####### correlation analysis ######
+HRV_corr_analysis <- read_xlsx(file.choose()) #select "correlationwhoop" dataset
+HRV_corr_analysis$PreHA_HTT2_END_HR <- as.numeric(as.character(HRV_corr_analysis$PreHA_HTT2_END_HR)) # fix string error
+HRV_corr_analysis$PostHA_HTT2_END_HR <- as.numeric(as.character(HRV_corr_analysis$PostHA_HTT2_END_HR)) #fix string error
+HRV_corr_clean <- HRV_corr_analysis %>% 
+  rename(
+    supplement = Supplement_3None_4BC_5CR,
+    POSTB2_120trec = PreHA_HTT1_T120_Trec,
+    POSTB2_baselineTrec = PreHA_HTT1_BSELINE_Trec,
+    POSTB2_aveHR = PreHA_HTT1_AveHR,
+    POSTB2_maxHR = PreHA_HTT1_MaxHR,
+    POSTB3_baselineTrec = PreHA_HTT2_BSELINE_Trec,
+    POSTB3_aveTrec = PreHA_HTT2_aveTrec,
+    POSTB3_endHR = PreHA_HTT2_END_HR,
+    POSTB3_maxHR = PreHA_HTT2_MaxHR,
+    POSTDAY9_120Trec = PostHA_HTT1_T120_Trec,
+    POSTDAY9_baselineTrec = PostHA_HTT1_BSELINE_Trec,
+    POSTDAY9_aveHR = PostHA_HTT1_AveHR,
+    POSTDAY9_maxHR = PostHA_HTT1_MaxHR,
+    POSTDAY10_baselineTrec = PostHA_HTT2_BSELINE_Trec,
+    POSTDAY10_aveTrec = PostHA_HTT2_aveTrec,
+    POSTDAY10_endHR = PostHA_HTT2_END_HR,
+    POSTDAY10_maxHR = PostHA_HTT2_MaxHR,
+    HTT1_pass_fail_1P_2F = POSTHA_HTT1_1P_2F,
+    HTT2_pass_fail_1P_2F = POSTHA_HTT2_1P_2F,
+    POSTDAY10_FOLDTrec = PostHA_HTT2_FOLD_Trec,
+    POSTDAY10_RoRTrec = PostHA_HTT2_RoR_Trec,
+    POSTB3_FOLDTrec = PREHA_HTT2_FOLD_Trec,
+    POSTB3_RoRTrec = PreHA_HTT2_RoR_Trec
+    ) %>% 
+  # mutate(POSTDAY9_restorative_sleep = POSTDAY9_REM + POSTDAY9_DEEP,
+  #        POSTDAY10_restorative_sleep = POSTDAY10_REM + POSTDAY10_DEEP,
+  #        POSTHA5_restorative_sleep = POSTHA5_REM + POSTHA5_DEEP,
+  #        POSTHA4_restorative_sleep = POSTHA4_REM + POSTHA4_DEEP,
+  #        POSTHA3_restorative_sleep = POSTHA3_REM + POSTHA3_DEEP,
+  #        POSTHA2_restorative_sleep = POSTHA2_REM + POSTHA2_DEEP,
+  #        POSTHA1_restorative_sleep = POSTHA1_REM + POSTHA1_DEEP,
+  #        PREHA1_restorative_sleep = PREHA1_REM + PREHA1_DEEP,
+  #        POSTB3_restorative_sleep = POSTB3_REM + POSTB3_DEEP,
+  #        POSTB2_restorative_sleep = POSTB2_REM + POSTB2_DEEP)%>% 
+  select(-contains("POSTB2_baseline"), -contains("PREHA_HTT1_1P_2F"), -contains("PREHA_HTT2_1P_2F")) %>% 
+  filter(!(supplement %in% c(4,5))) %>% 
+  pivot_longer(cols = matches("PRE|POST"),
+               names_to = "Days",
+               values_to = "values") 
+
+data_postday10 <- HRV_corr_clean %>%
+  filter(Days == "POSTDAY9_maxHR" | grepl("POSTDAY9", Days))
+# Adjust if necessary to select other recovery measures
+
+# Reshape back to wide format for correlation
+data_postday9_wide <- data_postday9 %>%
+  pivot_wider(names_from = Days, values_from = values)
+
+head(data_postday10_wide)
+ 
+recovery_vars <- c("POSTDAY10_HRV", "POSTDAY10_TST", "POSTDAY10_REM", "POSTDAY10_DEEP", "POSTDAY10_LIGHT", "POSTDAY10_SE", "POSTDAY10_Restorative_sleep")
+
+cor_results <- data.frame(
+  Recovery_Variable = character(), 
+  Correlation = numeric(), 
+  R_Squared = numeric(), 
+  P_Value = numeric(),
+  Significance = character(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each recovery variable and calculate the correlation 
+for (var in recovery_vars) {
+  # Check if the variable exists in the dataset (to avoid errors)
+  if (var %in% colnames(data_postdayb2_wide)) {
+    # Perform correlation test to get correlation, p-value, and confidence interval
+    cor_test <- cor.test(data_postdayb2_wide$POSTB2_maxHR, data_postdayb2_wide[[var]], method = "spearman", use = "pairwise.complete.obs")
+    
+    # Calculate r²
+    r_squared <- cor_test$estimate^2
+    
+    # Determine significance level
+    significance <- ifelse(cor_test$p.value < 0.001, "***", 
+                           ifelse(cor_test$p.value < 0.01, "**", 
+                                  ifelse(cor_test$p.value < 0.05, "*", "ns")))
+    
+    # Store the result in the data frame
+    cor_results <- rbind(cor_results, data.frame(
+      Recovery_Variable = var, 
+      Correlation = cor_test$estimate, 
+      R_Squared = r_squared, 
+      P_Value = cor_test$p.value,
+      Significance = significance
+    ))
+  }
+}
+
+# View the correlation results
+print(cor_results)
+
+# Create a formatted table
+kable(cor_results, 
+      caption = "Correlation Analysis: POSTB2 maxHR vs Recovery Variables",
+      col.names = c("Recovery Variable", "Correlation (r)", "R²", "P-value", "Sig. Level"))
+
+write_xlsx(cor_results, "POSTB2 maxHR correlation_results.xlsx")
+
+# Scatter plot
+scatter <- plot(data_postday9_wide$POSTDAY9_aveHR, data_postday9_wide$POSTDAY9_HRV, main="Scatter plot of POSTDAY9 aveHR vs. HRV", xlab="aveHR (bpm)", ylab="HRV") +
+  abline(lm(data_postday9_wide$POSTDAY9_HRV ~ data_postday9_wide$POSTDAY9_aveHR), col="red")# Adds a trendline
+
+text(140, 170, "R = -0.37")
+text(140, 165, "R² = 0.137")
+text(140, 160, "p = 0.037")
+
+####### correlation analysis by sex ####
+# Separate data by sex
+male_data <- data_postday10_wide %>% filter(Sex_1M_2F == 1)
+female_data <- data_postday10_wide %>% filter(Sex_1M_2F == 2)
+
+# Create separate correlation results for males and females
+cor_results_male <- data.frame(
+  Recovery_Variable = character(), 
+  Correlation = numeric(), 
+  R_Squared = numeric(), 
+  P_Value = numeric(),
+  Significance = character(),
+  stringsAsFactors = FALSE
+)
+
+cor_results_female <- data.frame(
+  Recovery_Variable = character(), 
+  Correlation = numeric(), 
+  R_Squared = numeric(), 
+  P_Value = numeric(),
+  Significance = character(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through recovery variables for males
+for (var in recovery_vars) {
+  if (var %in% colnames(male_data)) {
+    cor_test <- cor.test(male_data$POSTDAY10_maxHR, male_data[[var]], method = "pearson", use = "pariwise.complete.obs")
+    
+    r_squared <- cor_test$estimate^2
+    
+    significance <- ifelse(cor_test$p.value < 0.001, "***", 
+                           ifelse(cor_test$p.value < 0.01, "**", 
+                                  ifelse(cor_test$p.value < 0.05, "*", "ns")))
+    
+    cor_results_male <- rbind(cor_results_male, data.frame(
+      Recovery_Variable = var, 
+      Correlation = cor_test$estimate, 
+      R_Squared = r_squared, 
+      P_Value = cor_test$p.value,
+      Significance = significance
+    ))
+  }
+}
+
+# Loop through recovery variables for females
+for (var in recovery_vars) {
+  if (var %in% colnames(female_data)) {
+    cor_test <- cor.test(female_data$POSTDAY10_maxHR, female_data[[var]], method = "pearson", use = "pairwise.complete.obs")
+    
+    r_squared <- cor_test$estimate^2
+    
+    significance <- ifelse(cor_test$p.value < 0.001, "***", 
+                           ifelse(cor_test$p.value < 0.01, "**", 
+                                  ifelse(cor_test$p.value < 0.05, "*", "ns")))
+    
+    cor_results_female <- rbind(cor_results_female, data.frame(
+      Recovery_Variable = var, 
+      Correlation = cor_test$estimate, 
+      R_Squared = r_squared, 
+      P_Value = cor_test$p.value,
+      Significance = significance
+    ))
+  }
+}
+
+# Print results
+print("Male Correlations:")
+print(cor_results_male)
+print("Female Correlations:")
+print(cor_results_female)
+
+kable(cor_results_male, 
+      caption = "Correlation Analysis: POSTDAY10 maxHR vs Recovery Variables males",
+      col.names = c("Recovery Variable", "Correlation (r)", "R²", "P-value", "Sig. Level"))
+
+kable(cor_results_female, 
+      caption = "Correlation Analysis: POSTDAY10 maxHR vs Recovery Variables females",
+      col.names = c("Recovery Variable", "Correlation (r)", "R²", "P-value", "Sig. Level"))
+
+
+write_xlsx(cor_results_female, "POSTDAY10 maxHR female correlation_results.xlsx")
+
+#compare if the group diff is significant
+# Define a function for Fisher's r-to-z transformation comparison
+compare_correlations <- function(r1, n1, r2, n2) {
+  # Fisher's r-to-z transformation
+  z1 <- 0.5 * log((1 + r1) / (1 - r1))
+  z2 <- 0.5 * log((1 + r2) / (1 - r2))
+  
+  # Standard error of the difference
+  se_diff <- sqrt(1 / (n1 - 3) + 1 / (n2 - 3))
+  
+  # Z-statistic for the difference
+  z_stat <- abs(z1 - z2) / se_diff
+  
+  # P-value for the two-tailed test
+  p_value <- 2 * (1 - pnorm(z_stat))
+  
+  return(list(
+    z_statistic = z_stat,
+    p_value = p_value
+  ))
+}
+
+# Create a placeholder for comparison results
+comparison_results <- data.frame(
+  Recovery_Variable = character(),
+  Male_Correlation = numeric(),
+  Female_Correlation = numeric(),
+  Z_Statistic = numeric(),
+  P_Value = numeric(),
+  Significant = logical(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each recovery variable
+for (var in recovery_vars) {
+  # Check if the variable exists in male and female datasets
+  if (var %in% colnames(male_data) && var %in% colnames(female_data)) {
+    # Compute male and female correlations
+    male_cor_test <- cor.test(male_data$POSTDAY10_maxHR, male_data[[var]], method = "pearson", use = "pairwise.complete.obs")
+    female_cor_test <- cor.test(female_data$POSTDAY10_maxHR, female_data[[var]], method = "pearson", use = "pairwise.complete.obs")
+    
+    male_r <- male_cor_test$estimate
+    female_r <- female_cor_test$estimate
+    
+    # Get sample sizes
+    n_male <- nrow(male_data)
+    n_female <- nrow(female_data)
+    
+    # Perform Fisher's r-to-z comparison
+    comparison <- compare_correlations(male_r, n_male, female_r, n_female)
+    
+    # Add results to the comparison dataframe
+    comparison_results <- rbind(comparison_results, data.frame(
+      Recovery_Variable = var,
+      Male_Correlation = male_r,
+      Female_Correlation = female_r,
+      Z_Statistic = comparison$z_statistic,
+      P_Value = comparison$p_value,
+      Significant = comparison$p_value < 0.05
+    ))
+  }
+}
+
+# Print comparison results
+print(comparison_results)
+
+# Create a table using kable for visualization
+kable(comparison_results, 
+      caption = "Comparison of Correlations Between Males and Females",
+      col.names = c("Recovery Variable", "Male Correlation", "Female Correlation", 
+                    "Z-Statistic", "P-Value", "Significant?"))
+
+# Optionally, export the results
+write_xlsx(comparison_results, "POSTDAY10 max HR Male_Female_Correlation_Comparison.xlsx")
+
+
+
+####### correlation analysis by responder non responder ####
+responder_groups <- list(
+  Low  = filter(data_postday10_wide, Responder_1L_2LM_3HM_4H == 1),
+  LM   = filter(data_postday10_wide, Responder_1L_2LM_3HM_4H == 2),
+  HM   = filter(data_postday10_wide, Responder_1L_2LM_3HM_4H == 3),
+  H    = filter(data_postday10_wide, Responder_1L_2LM_3HM_4H == 4)
+)
+
+# Define the recovery variables
+recovery_vars <- c("POSTDAY10_HRV", "POSTDAY10_TST", "POSTDAY10_REM", "POSTDAY10_LIGHT", "POSTDAY10_DEEP", "POSTDAY10_SE", "POSTDAY10_Restorative_sleep")
+
+# Function to compute correlations for each group
+compute_correlations <- function(group_data, group_name) {
+  map_df(recovery_vars, function(var) {
+    if (var %in% colnames(group_data)) {
+      cor_test <- cor.test(group_data$POSTDAY10_maxHR, group_data[[var]], method = "pearson", use = "pairwise.complete.obs")
+      
+      tibble(
+        Group = group_name,
+        Recovery_Variable = var, 
+        Correlation = cor_test$estimate, 
+        R_Squared = cor_test$estimate^2, 
+        P_Value = cor_test$p.value,
+        Significance = case_when(
+          cor_test$p.value < 0.001 ~ "***",
+          cor_test$p.value < 0.01  ~ "**",
+          cor_test$p.value < 0.05  ~ "*",
+          TRUE ~ "ns"
+        )
+      )
+    }
+  })
+}
+
+# Apply function to all groups and combine results
+cor_results <- imap_dfr(responder_groups, compute_correlations)
+
+# Print results
+print(cor_results)
+
+# Generate nicely formatted table
+kable(cor_results, 
+      caption = "Correlation Analysis: POSTDAY9 maxHR vs Recovery Variables",
+      col.names = c("Group", "Recovery Variable", "Correlation (r)", "R²", "P-value", "Sig. Level"))
+
+# Save to an Excel file with separate sheets for each group
+write_xlsx(split(cor_results, cor_results$Group), "POSTDAY10_maxHR_vs_Recovery_Variables_responders_4.xlsx")
+
+#compare if the group diff is significant
+# Define a function for Fisher's r-to-z transformation comparison
+compare_correlations <- function(r1, n1, r2, n2) {
+  # Fisher's r-to-z transformation
+  z1 <- 0.5 * log((1 + r1) / (1 - r1))
+  z2 <- 0.5 * log((1 + r2) / (1 - r2))
+  
+  # Standard error of the difference
+  se_diff <- sqrt(1 / (n1 - 3) + 1 / (n2 - 3))
+  
+  # Z-statistic for the difference
+  z_stat <- abs(z1 - z2) / se_diff
+  
+  # P-value for the two-tailed test
+  p_value <- 2 * (1 - pnorm(z_stat))
+  
+  return(list(
+    z_statistic = z_stat,
+    p_value = p_value
+  ))
+}
+
+# Create a placeholder for comparison results
+comparison_results <- data.frame(
+  Recovery_Variable = character(),
+  responder_Correlation = numeric(),
+  nonresponder_Correlation = numeric(),
+  Z_Statistic = numeric(),
+  P_Value = numeric(),
+  Significant = logical(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each recovery variable
+for (var in recovery_vars) {
+  # Check if the variable exists in male and female datasets
+  if (var %in% colnames(responder_data_htt2) && var %in% colnames(nonresponder_data_htt2)) {
+    # Compute male and female correlations
+    pass_cor_test <- cor.test(responder_data_htt2$POSTDAY10_maxHR, responder_data_htt2[[var]], method = "pearson", use = "pairwise.complete.obs")
+    fail_cor_test <- cor.test(nonresponder_data_htt2$POSTDAY10_maxHR, nonresponder_data_htt2[[var]], method = "pearson", use = "pairwise.complete.obs")
+    
+    pass_r <- pass_cor_test$estimate
+    fail_r <- fail_cor_test$estimate
+    
+    # Get sample sizes
+    n_pass <- nrow(responder_data_htt2)
+    n_fail <- nrow(nonresponder_data_htt2)
+    
+    # Perform Fisher's r-to-z comparison
+    comparison <- compare_correlations(pass_r, n_pass, fail_r, n_fail)
+    
+    # Add results to the comparison dataframe
+    comparison_results <- rbind(comparison_results, data.frame(
+      Recovery_Variable = var,
+      responder_Correlation = pass_r,
+      nonresponder_Correlation = fail_r,
+      Z_Statistic = comparison$z_statistic,
+      P_Value = comparison$p_value,
+      Significant = comparison$p_value < 0.05
+    ))
+  }
+}
+
+# Print comparison results
+print(comparison_results)
+
+# Create a table using kable for visualization
+kable(comparison_results, 
+      caption = "Comparison of Correlations Between responder and non-responders",
+      col.names = c("Recovery Variable", "responder Correlation", "nonresponder Correlation", 
+                    "Z-Statistic", "P-Value", "Significant?"))
+
+write_xlsx(comparison_results, "POSTDAY10 max HR pass_fail__Correlation_Comparison.xlsx")
+
+####### correlation by VO2max ########
+VO2max_corr_data <- read_xlsx(file.choose())
+vo2max_corr_clean <- VO2max_corr_data %>% 
+  rename(vo2max = `VO2max (ml/kg/min)`) %>% 
+  select(SUB, sex, supplement, vo2max, matches("POSTDAY9|POSTDAY10"), matches("Responder"), -contains("RHR")) %>% 
+  filter(supplement == "3") %>% 
+  mutate(POSTDAY9_restorative_sleep = POSTDAY9_REM + POSTDAY9_DEEP,
+         POSTDAY10_restorative_sleep = POSTDAY10_REM + POSTDAY10_DEEP)
+
+# Define the recovery variables
+recovery_vars <- c("POSTDAY10_HRV", "POSTDAY10_TST", "POSTDAY10_REM", "POSTDAY10_LIGHT", "POSTDAY10_DEEP", "POSTDAY10_SE", "POSTDAY10_restorative_sleep")
+
+vo2max_grouped <- vo2max_corr_clean %>% 
+  group_by(sex) %>% ###this groups the whole dataset by sex and then gets median for each sex
+  mutate(VO2max_group = case_when(
+    vo2max <= median(vo2max, na.rm = TRUE) ~ "Low",###then separates to high and low, and then combines the highs and lows together
+    TRUE ~ "High"
+  )) %>%
+  ungroup() 
+
+vo2max_correlation_analysis <- function(data, recovery_vars) {
+  data %>%
+    group_by(VO2max_group) %>% 
+    summarise(across(all_of(recovery_vars), 
+                     ~ cor(.x, POSTDAY9_AveHR, use = "pairwise.complete.obs"), 
+                     .names = "cor_{.col}"), 
+              .groups = "drop")
+}
+
+# Run the analysis
+vo2max_corr_results <- vo2max_correlation_analysis(vo2max_grouped, recovery_vars)
+
+# Print the results
+print(vo2max_corr_results)
+
+vo2max_correlation_analysis_pvalues <- function(data, recovery_vars) {
+  data %>%
+    group_by(VO2max_group) %>% 
+    summarise(across(all_of(recovery_vars), 
+                     ~ broom::tidy(cor.test(.x, POSTDAY9_AveHR, use = "pairwise.complete.obs"))$p.value, 
+                     .names = "pval_{.col}"), 
+              .groups = "drop")
+}
+
+
+# Run analysis
+vo2max_corr_pvalues <- vo2max_correlation_analysis_pvalues(vo2max_grouped, recovery_vars)
+
+# Combine correlations and p-values
+final_results <- left_join(vo2max_corr_results, vo2max_corr_pvalues, by = "VO2max_group")
+
+# Print results
+print(final_results)
+
+vo2max_correlation_analysis_pvalues <- function(data, recovery_vars) {
+  results <- data %>%
+    group_by(VO2max_group) %>%
+    summarise(across(all_of(recovery_vars), 
+                     ~ list(cor = cor(.x, POSTDAY9_aveHR, use = "pairwise.complete.obs"), 
+                            pval = broom::tidy(cor.test(.x, POSTDAY9_aveHR, use = "pairwise.complete.obs"))$p.value)), 
+              .groups = "drop") %>%
+    pivot_longer(cols = -VO2max_group, names_to = "Variable", values_to = "Results") %>%
+    unnest_wider(Results) %>%
+    pivot_wider(names_from = VO2max_group, values_from = c(cor, pval), names_glue = "{.value}_{VO2max_group}") %>%
+    rename(Low_Correlation = cor_Low, High_Correlation = cor_High,
+           P_Value_Low = pval_Low, P_Value_High = pval_High) %>%
+    select(Variable, Low_Correlation, P_Value_Low, High_Correlation, P_Value_High)
+  
+  return(results)
+}
+
+View(results)
+
+
+#with combined
+vo2max_grouped_all <- vo2max_corr_clean %>%
+  mutate(VO2max_group = case_when(
+    vo2max <= quantile(vo2max, probs = 1/3, na.rm = TRUE) ~ "Low",  # First third (lowest values)
+    vo2max <= quantile(vo2max, probs = 2/3, na.rm = TRUE) ~ "Mid",  # Middle third
+    TRUE ~ "High"  # Last third (highest values)
+  )) %>%
+  ungroup() 
+
+vo2max_correlation_comparison <- function(vo2model_recoveryvar) {
+  # Separate data by VO2max groups
+  low_vo2 <- vo2max_grouped_all %>% filter(VO2max_group == "Low")
+  mid_vo2 <- vo2max_grouped_all %>% filter(VO2max_group == "Mid")
+  high_vo2 <- vo2max_grouped_all %>% filter(VO2max_group == "High")
+  
+  # Create results dataframe
+  results <- data.frame(
+    Variable = vo2model_recoveryvar,
+    Low_VO2max_Correlation = sapply(vo2model_recoveryvar, function(var) 
+      cor(low_vo2$POSTDAY10_MaxHR, low_vo2[[var]], use = "pairwise.complete.obs")),
+    Mid_VO2max_Correlation = sapply(vo2model_recoveryvar, function(var) 
+      cor(mid_vo2$POSTDAY10_MaxHR, mid_vo2[[var]], use = "pairwise.complete.obs")),
+    High_VO2max_Correlation = sapply(vo2model_recoveryvar, function(var) 
+      cor(high_vo2$POSTDAY10_MaxHR, high_vo2[[var]], use = "pairwise.complete.obs"))
+  )
+  
+  # Add sample sizes
+  results$n_Low <- nrow(low_vo2)
+  results$n_Mid <- nrow(mid_vo2)
+  results$n_High <- nrow(high_vo2)
+  
+  # Add Fisher's z-test for comparing correlations
+  results$Z_Statistic <- sapply(vo2model_recoveryvar, function(var) {
+    r1 <- cor(low_vo2$POSTDAY10_MaxHR, low_vo2[[var]], use = "pairwise.complete.obs")
+    r2 <- cor(mid_vo2$POSTDAY10_MaxHR, mid_vo2[[var]], use = "pairwise.complete.obs")
+   # r2 <- cor(high_vo2$POSTDAY10_MaxHR, high_vo2[[var]], use = "pairwise.complete.obs")
+    
+    # Fisher's z-transformation
+    z1 <- 0.5 * log((1 + r1) / (1 - r1))
+    z2 <- 0.5 * log((1 + r2) / (1 - r2))
+    
+    # Standard error
+    se_diff <- sqrt(1/(nrow(low_vo2) - 3) + 1/(nrow(high_vo2) - 3))
+    
+    # Z-statistic
+    abs((z1 - z2) / se_diff)
+  })
+  
+  # Calculate p-values
+  results$P_Value <- 2 * (1 - pnorm(results$Z_Statistic))
+  
+  # Round numeric columns
+  results[,2:3] <- round(results[,2:3], 3)
+  results$Z_Statistic <- round(results$Z_Statistic, 3)
+  results$P_Value <- round(results$P_Value, 4)
+  
+  # Add significance levels
+  results$Significance <- ifelse(results$P_Value < 0.001, "***",
+                                 ifelse(results$P_Value < 0.01, "**",
+                                        ifelse(results$P_Value < 0.05, "*", "ns")))
+  
+  return(results)
+}
+
+# Run the analysis
+vo2max_group_results_all <- vo2max_correlation_comparison(vo2model_recoveryvar)
+write_xlsx(vo2max_group_results_all, "POSTDAY10 maxHR vs Recovery Variables combined tertiles.xlsx")
+
+
+############# correlation heat map #############
+cor_matrix <- data_postB3_wide %>%
+  select(POSTB3_maxHR, all_of(recovery_vars)) %>%
+  cor(use = "complete.obs", method = "pearson") # Pearson correlation matrix
+cor_matrix_postday10 <- data_postday10_wide %>% 
+  select(POSTDAY10_maxHR, all_of(recovery_vars_2)) %>% 
+  cor(use = "complete.obs", method = "pearson")
+
+# Convert matrix to long format for ggplot2
+cor_long <- as.data.frame(as.table(cor_matrix))
+
+cor_long_10<- as.data.frame(as.table(cor_matrix_postday10))
+
+# Heatmap using ggplot2
+heatmap_B3 <- ggplot(cor_long, aes(Var1, Var2, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), 
+                       name = "Correlation") +
+  geom_text(aes(label = round(Freq, 2)), color = "black", size = 3)+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   hjust = 1)) +
+  labs(title = "Correlation Heatmap for POSTB3",
+       x = "Variables",
+       y = "Variables")
+
+heatmap_10 <- ggplot(cor_long_10, aes(Var1, Var2, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), 
+                       name = "Correlation") +
+  geom_text(aes(label = round(Freq, 2)), color = "black", size = 3)+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   hjust = 1)) +
+  labs(title = "Correlation Heatmap for POSTDAY10",
+       x = "Variables",
+       y = "Variables")
+
+heatmap_B3+heatmap_10
+
+#for correlations that are in the 0.20s and 0.30s and not sig, test its linearity
+ggplot(data_postb2_wide, aes(x = POSTB2_120trec, y = POSTB2_TST)) +
+  geom_point() +  # Adds scatter points
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +  # Adds LOESS smoothing line
+  labs(title = "Scatterplot with LOESS Curve: POSTB2 120Trec vs POSTB2_TST",
+       x = "POSTB2 120Trec",
+       y = "POSTB2_TST") +
+  theme_minimal()
+
+
+
+
+
+#####violin plot TST TIB#####
+recovery_master <- read_xlsx(file.choose())
+head(recovery_master)
+
+recovery_clean2 <- recovery_master %>% 
+  select(contains("SUB"), contains("Supplement"), contains("Sex"), contains("TST"), contains("TIB")) %>% 
+  pivot_longer(cols = matches("^PRE|^POST"),
+               names_to = "Days",
+               values_to = "hours")
+
+ggplot(recovery_clean2 %>% filter(str_detect(Days, "TST")), aes(x = Days, y = hours)) +
+  geom_violin(trim = FALSE, fill = "lightblue", color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.5) +  
+  stat_summary(fun.min = min, fun.max = max, fun = median, geom = "pointrange", 
+               color = "red", size = 1) + 
+  stat_summary(fun = quantile, fun.args = list(probs = 0.25), geom = "point", color = "red", size = 2) + 
+  stat_summary(fun = quantile, fun.args = list(probs = 0.75), geom = "point", color = "red", size = 2) +
+  theme_minimal() +
+  labs(title = "Distribution of Total Sleep Time (TST)",
+       x = "Days",
+       y = "Hours")
+
+# Set the desired order
+desired_order <- c("PREB2_TST", "POSTB2_TST", "POSTB3_TST", 
+                   "PREHA1_TST", "POSTHA1_TST", "POSTHA2_TST", 
+                   "POSTHA3_TST", "POSTHA4_TST", "POSTHA5_TST", 
+                   "PREDAY9_TST", "POSTDAY9_TST", "POSTDAY10_TST")
+
+# Your plot with the new order
+tst_plot <- ggplot(recovery_clean2 %>% filter(str_detect(Days, "TST")), 
+       aes(x = factor(Days, levels = desired_order), y = hours)) +
+  geom_violin(trim = FALSE, fill = "lightblue", color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.5) +  
+  stat_summary(fun.min = min, fun.max = max, fun = median, geom = "pointrange", 
+               color = "red", size = 1) + 
+  stat_summary(fun = quantile, fun.args = list(probs = 0.25), geom = "point", color = "red", size = 2) + 
+  stat_summary(fun = quantile, fun.args = list(probs = 0.75), geom = "point", color = "red", size = 2) +
+  theme_minimal() +
+  labs(title = "Distribution of Total Sleep Time (TST)",
+       x = "Days",
+       y = "Hours") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Added this to make labels more readable
+
+
+# Set the desired order (same pattern as TST but with TIB)
+desired_order2 <- c("PREB2_TIB", "POSTB2_TIB", "POSTB3_TIB", 
+                   "PREHA1_TIB", "POSTHA1_TIB", "POSTHA2_TIB", 
+                   "POSTHA3_TIB", "POSTHA4_TIB", "POSTHA5_TIB", 
+                   "PREDAY9_TIB", "POSTDAY9_TIB", "POSTDAY10_TIB")
+
+tib_plot <- ggplot(recovery_clean2 %>% filter(str_detect(Days, "TIB")), 
+       aes(x = factor(Days, levels = desired_order2), y = hours)) +
+  geom_violin(trim = FALSE, fill = "lightgreen", color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.5) +  
+  stat_summary(fun.min = min, fun.max = max, fun = median, geom = "pointrange", 
+               color = "red", size = 1) + 
+  stat_summary(fun = quantile, fun.args = list(probs = 0.25), geom = "point", color = "red", size = 2) + 
+  stat_summary(fun = quantile, fun.args = list(probs = 0.75), geom = "point", color = "red", size = 2) +
+  theme_minimal() +
+  labs(title = "Distribution of Time in Bed (TIB)",
+       x = "Days",
+       y = "Hours") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Same angled labels for readability
+
+combined_plot <- tst_plot/ tib_plot
+
+combined_plot
+
+ggsave("combined_plots.png", combined_plot, width = 12, height = 20)
+
+
+
+
+
+######## non parametric t test
+time_points <- colnames(Recovery_analysis)[54:65]  # Exclude Subject column
+results <- list()  # Store results
+# Initialize a vector to store p-values
+p_values <- c()
+
+# Perform the Wilcoxon Signed Rank tests and collect the p-values
+for (i in 1:(length(time_points)-1)) {
+  for (j in (i+1):length(time_points)) {
+    test_result <- wilcox.test(Recovery_analysis[[time_points[i]]], 
+                               Recovery_analysis[[time_points[j]]], 
+                               paired = TRUE, exact = FALSE, correct = FALSE)
+    
+    p_values <- c(p_values, test_result$p.value)
+  }
+}
+
+# Apply Benjamini-Hochberg correction to the collected p-values
+adjusted_p_values <- p.adjust(p_values, method = "BH")
+
+# Print the adjusted p-values along with the comparisons
+results <- list()
+counter <- 1
+for (i in 1:(length(time_points)-1)) {
+  for (j in (i+1):length(time_points)) {
+    results[[paste(time_points[i], "vs", time_points[j])]] <- adjusted_p_values[counter]
+    counter <- counter + 1
+  }
+}
+
+# Print the results with adjusted p-values
+print(results)
+
+
+wilcox_results <- data.frame(results)
+write_xlsx(wilcox_results,"02132025 non parametric wilcox TST BH.xlsx")
